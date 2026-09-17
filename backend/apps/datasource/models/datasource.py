@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from pydantic import BaseModel
 from sqlalchemy import Column, Text, BigInteger, DateTime, Identity
@@ -197,8 +197,9 @@ class PreviewResponse(BaseModel):
 
 
 class FieldInfo(BaseModel):
-    fieldName: object
-    fieldType: str
+    fieldName: object = None
+    fieldId: str | None = None
+    fieldType: Literal['string', 'int', 'float', 'datetime']
 
 
 class SheetFields(BaseModel):
@@ -207,5 +208,22 @@ class SheetFields(BaseModel):
 
 
 class ImportRequest(BaseModel):
-    filePath: str
+    filePath: str | None = None
+    conversionId: str | None = None
     sheets: List[SheetFields]
+
+
+class ExcelSheetOptions(BaseModel):
+    sheetName: str
+    headerMode: Literal['single', 'multi'] = 'single'
+    headerStartRow: int | None = None
+    headerEndRow: int | None = None
+    dataStartRow: int | None = None
+    dataEndRow: int | None = None
+    firstColumn: int | None = None
+    lastColumn: int | None = None
+
+
+class ExcelConvertRequest(BaseModel):
+    uploadId: str
+    sheets: List[ExcelSheetOptions]

@@ -43,6 +43,7 @@ const isEditTable = ref(false)
 const checkList = ref<any>([])
 const tableList = ref<any>([])
 const excelUploadSuccess = ref(false)
+const multiHeader = ref(false)
 const tableListLoading = ref(false)
 const tableListLoadingV1 = ref(false)
 const checkLoading = ref(false)
@@ -140,6 +141,7 @@ const close = () => {
   checkList.value = []
   tableList.value = []
   excelUploadSuccess.value = false
+  multiHeader.value = false
   saveLoading.value = false
 }
 
@@ -439,6 +441,10 @@ const preview = debounce(() => {
 }, 200)
 
 const beforeUpload = (rawFile: any) => {
+  if (multiHeader.value && rawFile.name.toLowerCase().endsWith('.csv')) {
+    ElMessage.warning('CSV 仅支持普通表头，请关闭多级表头选项')
+    return false
+  }
   setFile(rawFile)
   if (rawFile.size / 1024 / 1024 > 50) {
     ElMessage.error(t('common.not_exceed_50mb'))
@@ -600,6 +606,7 @@ defineExpose({
           />
         </el-form-item>
         <div v-if="form.type === 'excel'">
+          <el-checkbox v-if="!form.id" v-model="multiHeader" :disabled="uploadLoading">包含多级表头</el-checkbox>
           <el-form-item prop="sheets" :label="t('ds.form.file')">
             <div v-if="form.filename" class="pdf-card">
               <img :src="icon_fileExcel_colorful" width="40px" height="40px" />
@@ -630,6 +637,7 @@ defineExpose({
               accept=".xlsx,.xls,.csv"
               :headers="headers"
               :action="getUploadURL"
+              :data="{ multiHeader }"
               :before-upload="beforeUpload"
               :on-error="onError"
               :on-success="onSuccess"
@@ -646,6 +654,7 @@ defineExpose({
               accept=".xlsx,.xls,.csv"
               :headers="headers"
               :action="getUploadURL"
+              :data="{ multiHeader }"
               :before-upload="beforeUpload"
               :on-success="onSuccess"
               :on-error="onError"
