@@ -50,12 +50,14 @@
           </el-select>
         </el-form-item>
         <div v-if="form.type === 'excel'">
+          <el-checkbox v-model="multiHeader" :disabled="!isCreate">包含多级表头</el-checkbox>
           <el-form-item label="File">
             <el-upload
               :disabled="!isCreate"
               accept=".xls, .xlsx, .csv"
               :headers="headers"
               :action="getUploadURL"
+              :data="{ multiHeader }"
               :before-upload="beforeUpload"
               :on-success="onSuccess"
             >
@@ -166,8 +168,10 @@
       </el-button>
     </div>
   </el-dialog>
+  <ExcelDetailDialog ref="excelDetailDialogRef" @finish="saveExcel" />
 </template>
 <script lang="ts" setup>
+import ExcelDetailDialog from './ExcelDetailDialog.vue'
 import { ref, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { datasourceApi } from '@/api/datasource'
@@ -188,11 +192,13 @@ const isEditTable = ref(false)
 const checkList = ref<any>([])
 const tableList = ref<any>([])
 const excelUploadSuccess = ref(false)
+const multiHeader = ref(false)
+const excelDetailDialogRef = ref<InstanceType<typeof ExcelDetailDialog>>()
 const tableListLoading = ref(false)
 const token = wsCache.get('user.token')
 const headers = ref<any>({ 'X-SQLBOT-TOKEN': `Bearer ${token}` })
 const dialogTitle = ref('')
-const getUploadURL = import.meta.env.VITE_API_BASE_URL + '/datasource/uploadExcel'
+const getUploadURL = import.meta.env.VITE_API_BASE_URL + '/datasource/parseExcel'
 const saveLoading = ref<boolean>(false)
 
 const { t } = useI18n()
@@ -238,6 +244,7 @@ const close = () => {
   checkList.value = []
   tableList.value = []
   excelUploadSuccess.value = false
+  multiHeader.value = false
   saveLoading.value = false
 }
 
@@ -455,6 +462,10 @@ const preview = () => {
 }
 
 const beforeUpload = (rawFile: any) => {
+  if (multiHeader.value && rawFile.name.toLowerCase().endsWith('.csv')) {
+    ElMessage.warning('CSV 仅支持普通表头，请关闭多级表头选项')
+    return false
+  }
   if (rawFile.size / 1024 / 1024 > 50) {
     ElMessage.error('File size can not exceed 50MB!')
     return false
@@ -463,6 +474,11 @@ const beforeUpload = (rawFile: any) => {
 }
 
 const onSuccess = (response: any) => {
+  excelDetailDialogRef.value?.init(response.data)
+}
+
+const saveExcel = (result: any) => {
+  const response = { data: result }
   form.value.filename = response.data.filename
   form.value.sheets = response.data.sheets
   tableList.value = response.data.sheets

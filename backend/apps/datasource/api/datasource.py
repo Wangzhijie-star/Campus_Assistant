@@ -10,7 +10,7 @@ from typing import List
 from urllib.parse import quote
 
 import pandas as pd
-from fastapi import APIRouter, File, UploadFile, HTTPException, Path
+from fastapi import APIRouter, File, UploadFile, HTTPException, Path, Form
 from fastapi.responses import StreamingResponse
 from psycopg2 import sql
 from sqlalchemy import and_
@@ -30,8 +30,8 @@ from ..crud.datasource import get_datasource_list, check_status, create_ds, upda
 from ..crud.field import get_fields_by_table_id
 from ..crud.table import get_tables_by_ds_id
 from ..models.datasource import CoreDatasource, CreateDatasource, TableObj, CoreTable, CoreField, FieldObj, \
-    TableSchemaResponse, ColumnSchemaResponse, PreviewResponse, ImportRequest
-from ..utils.excel import parse_excel_preview, USER_TYPE_TO_PANDAS
+    TableSchemaResponse, ColumnSchemaResponse, PreviewResponse, ImportRequest, ExcelConvertRequest
+from ..utils.excel_import import ConversionStore, ImportValidationError, import_conversion
 
 router = APIRouter(tags=["Datasource"], prefix="/datasource")
 path = settings.EXCEL_PATH
@@ -536,89 +536,66 @@ async def upload_ds_schema(session: SessionDep, id: int = Path(..., description=
 
 @router.post("/parseExcel", response_model=None, summary=f"{PLACEHOLDER_PREFIX}ds_parse_excel")
 @require_permissions(permission=SqlbotPermission(role=['ws_admin']))
-async def parse_excel(file: UploadFile = File(..., description=f"{PLACEHOLDER_PREFIX}ds_excel")):
-    ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
-    if not file.filename.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
-        raise HTTPException(400, "Only support .xlsx/.xls/.csv")
-
-    os.makedirs(path, exist_ok=True)
-    filename = f"{file.filename.split('.')[0].split('/')[-1]}_{hashlib.sha256(uuid.uuid4().bytes).hexdigest()[:10]}.{file.filename.split('.')[-1]}"
-    save_path = os.path.join(path, filename)
-    with open(save_path, "wb") as f:
-        f.write(await file.read())
+async def parse_excel(user: CurrentUser, file: UploadFile = File(...), multiHeader: bool = Form(False)):
+    contents = await file.read(50 * 1024 * 1024 + 1)
 
     def inner():
-        sheets_data = parse_excel_preview(save_path)
-        return {
-            "filePath": filename,
-            "data": sheets_data
-        }
+        try:
+            store = ConversionStore(path, user.id, user.oid)
+            upload_id, upload = store.upload(file.filename or '', contents)
+            if multiHeader:
+                if upload['source'].endswith('.csv'):
+                    raise ImportValidationError('CSV 仅支持普通表头模式')
+                return {'uploadId': upload_id, 'sheetNames': upload['sheetNames'], 'needsConfiguration': True}
+            conversion_id, conversion = store.convert(upload_id, [
+                {'sheetName': name, 'headerMode': 'single'} for name in upload['sheetNames']
+            ])
+            return store.preview(conversion_id, conversion)
+        except (ValueError, KeyError, OSError) as error:
+            raise HTTPException(400, str(error)) from error
 
+    return await asyncio.to_thread(inner)
+
+
+@router.post("/convertExcel", response_model=None)
+@require_permissions(permission=SqlbotPermission(role=['ws_admin']))
+async def convert_excel(user: CurrentUser, request: ExcelConvertRequest):
+    def inner():
+        try:
+            store = ConversionStore(path, user.id, user.oid)
+            conversion_id, conversion = store.convert(
+                request.uploadId, [s.model_dump() for s in request.sheets])
+            return store.preview(conversion_id, conversion)
+        except (ValueError, KeyError, OSError) as error:
+            raise HTTPException(400, str(error)) from error
     return await asyncio.to_thread(inner)
 
 
 @router.post("/importToDb", response_model=None, summary=f"{PLACEHOLDER_PREFIX}ds_import_to_db")
 @require_permissions(permission=SqlbotPermission(role=['ws_admin']))
-async def import_to_db(session: SessionDep, trans: Trans, import_req: ImportRequest):
-    save_path = os.path.join(path, import_req.filePath)
-    if not os.path.exists(save_path):
-        raise HTTPException(400, "File not found")
-
+async def import_to_db(session: SessionDep, trans: Trans, user: CurrentUser, import_req: ImportRequest):
     def inner():
-        engine = get_engine_conn()
-        results = []
-
-        for sheet_info in import_req.sheets:
-            sheet_name = sheet_info.sheetName
-            table_name = f"excel_{filter_string(sheet_name)}_{hashlib.sha256(uuid.uuid4().bytes).hexdigest()[:10]}"
-            fields = sheet_info.fields
-
-            field_mapping = {f.fieldName: f.fieldType for f in fields}
-            dtype_dict = {
-                col: USER_TYPE_TO_PANDAS.get(field_mapping.get(col, 'string'), 'string')
-                for col in field_mapping.keys()
-            }
-
-            try:
-                if save_path.endswith(".csv"):
-                    df = pd.read_csv(save_path, engine='c', dtype=dtype_dict)
-                    sheet_name = "Sheet1"
-                else:
-                    df = pd.read_excel(save_path, sheet_name=sheet_name, engine='calamine', dtype=dtype_dict)
-            except Exception as e:
-                raise HTTPException(500, f"{trans('i18n_ds_upload_error')}: {str(e)}")
-
-            conn = engine.raw_connection()
-            cursor = conn.cursor()
-            try:
-                df.to_sql(
-                    table_name,
-                    engine,
-                    if_exists='replace',
-                    index=False
-                )
-                output = StringIO()
-                df.to_csv(output, sep='\t', header=False, index=False)
-
-                query = sql.SQL("COPY {} FROM STDIN WITH CSV DELIMITER E'\t'").format(
-                    sql.Identifier(table_name)
-                )
-                cursor.copy_expert(sql=query.as_string(cursor.connection), file=output)
-                conn.commit()
-                results.append({
-                    "sheetName": sheet_name,
-                    "tableName": table_name,
-                    "tableComment": "",
-                    "rows": len(df)
-                })
-            except Exception as e:
-                raise HTTPException(500, f"Insert data failed for {table_name}: {str(e)}")
-            finally:
-                cursor.close()
-                conn.close()
-
-        return {"filename": import_req.filePath, "sheets": results}
-
+        engine = None
+        try:
+            store = ConversionStore(path, user.id, user.oid)
+            conversion_id = import_req.conversionId
+            selections = [s.model_dump() for s in import_req.sheets]
+            if not conversion_id:
+                # Older clients can still use filePath returned by parseExcel.
+                # Unowned files uploaded before this feature must be uploaded again.
+                upload_id = import_req.filePath
+                store.load(upload_id, 'upload')
+                conversion_id, conversion = store.convert(upload_id, [
+                    {'sheetName': s['sheetName'], 'headerMode': 'single'} for s in selections])
+            with store.lock(conversion_id):
+                conversion = store.load(conversion_id, 'conversion')
+                engine = get_engine_conn()
+                return import_conversion(engine, conversion_id, conversion, selections)
+        except ImportValidationError as error:
+            raise HTTPException(400, str(error)) from error
+        finally:
+            if engine is not None:
+                engine.dispose()
     return await asyncio.to_thread(inner)
 
 

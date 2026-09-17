@@ -2,6 +2,7 @@
 import { ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SheetTabs from './SheetTabs.vue'
+import ExcelHeaderDialog from './ExcelHeaderDialog.vue'
 import field_text from '@/assets/svg/field_text.svg'
 import field_time from '@/assets/svg/field_time.svg'
 import field_value from '@/assets/svg/field_value.svg'
@@ -43,7 +44,14 @@ const variables = [
 
 let arr: any = []
 let filePath = ''
+let conversionId: string | undefined
+const headerDialog = ref<InstanceType<typeof ExcelHeaderDialog>>()
 const init = (response: any) => {
+  if (response.needsConfiguration) {
+    headerDialog.value?.init(response)
+    return
+  }
+  conversionId = response.conversionId
   arr = response.data || []
   filePath = response.filePath
   previewData.value = response.data[0]
@@ -81,6 +89,7 @@ const save = () => {
         return { fields: item.fields, sheetName: item.sheetName }
       }),
       filePath,
+      conversionId,
     })
     .then((res: any) => {
       closeDialog()
@@ -128,10 +137,11 @@ defineExpose({
 </script>
 
 <template>
+  <ExcelHeaderDialog ref="headerDialog" @preview="init" />
   <el-dialog
     v-model="dialogShow"
     :title="$t('ds.preview')"
-    width="1200"
+    width="min(1200px, 96vw)"
     modal-class="excel-detail-dialog"
     destroy-on-close
     :close-on-click-modal="false"
@@ -139,6 +149,7 @@ defineExpose({
   >
     <SheetTabs :active-tab="activeTab" :tab-list="tabList" @tab-click="handleTabClick"></SheetTabs>
     <div v-loading="loading" class="content">
+      <el-alert v-for="warning in previewData.warnings || []" :key="warning" :title="warning" type="warning" :closable="false" />
       <div class="btn-select" style="margin: 8px 12px">
         <el-button :class="[btnSelect === 'd' && 'is-active']" text @click="btnSelectClick('d')">
           {{ t('ds.preview') }}
@@ -158,6 +169,7 @@ defineExpose({
           style="width: 100%; height: 100%"
         >
           <el-table-column prop="fieldName" :label="t('datasource.field_name')" />
+          <el-table-column prop="meaning" label="完整字段说明" min-width="320" show-overflow-tooltip />
           <el-table-column prop="fieldType" :label="t('datasource.field_type')" width="240">
             <template #default="scope">
               <el-icon
@@ -212,7 +224,7 @@ defineExpose({
 
     <div style="display: flex; justify-content: flex-end; margin-top: 20px">
       <el-button secondary @click="closeDialog">{{ $t('common.cancel') }}</el-button>
-      <el-button v-loading="loading" type="primary" @click="save">{{
+      <el-button :loading="loading" :disabled="loading" type="primary" @click="save">{{
         $t('sync.confirm_upload')
       }}</el-button>
     </div>
@@ -222,7 +234,7 @@ defineExpose({
 <style lang="less">
 .excel-detail-dialog {
   .content {
-    height: 593px;
+    height: min(593px, calc(100vh - 240px));
     background-color: #f5f6f7;
     border: 1px solid #dee0e3;
     border-radius: 6px;

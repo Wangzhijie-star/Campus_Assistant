@@ -7,6 +7,7 @@ export const datasourceApi = {
   relationSave: (dsId: any, data: any) => request.post(`/table_relation/save/${dsId}`, data),
   add: (data: any) => request.post('/datasource/add', data),
   importToDb: (data: any) => request.post('/datasource/importToDb', data),
+  convertExcel: (data: any) => request.post('/datasource/convertExcel', data),
   list: () => request.get('/datasource/list'),
   update: (data: any) => request.post('/datasource/update', data),
   delete: (id: number, name: string) => request.post(`/datasource/delete/${id}/${name}`),
