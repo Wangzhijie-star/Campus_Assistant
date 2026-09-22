@@ -1,0 +1,12 @@
+__pycache__/
+tests/.output/
+config.local.json
+config.*.json
+!config.example.json
+reports/
+
+# Personal design notes and historical operating records stay local.
+/docs/
+/*.md
+!/README.md
+!/团队测试SOP.md

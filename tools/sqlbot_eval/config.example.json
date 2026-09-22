@@ -1,0 +1,17 @@
+{
+  "base_url": "http://localhost:8000/api/v1",
+  "datasource_id": null,
+  "datasource_name": "软件2404班及李思达老师所带班级学生成绩数据",
+  "token_env": "SQLBOT_TOKEN",
+  "timeout_s": 600,
+  "connect_timeout_s": 10,
+  "confirm_timeout_s": 30,
+  "poll_s": 2,
+  "max_prompt_chars": 150000,
+  "rubric_version": "v1",
+  "weights": {},
+  "na_policy": "pending",
+  "data_version": "待填写",
+  "deployment_version": "待填写",
+  "model_version": "待填写"
+}
