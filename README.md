@@ -88,7 +88,7 @@ flowchart TD
 ### 1. 获取源码与安装依赖
 
 ```bash
-git clone https://github.com/Wangzhijie-star/Campus_SqlAssistant.git
+git clone https://github.com/Wangzhijie-star/Campus_Assistant.git Campus_SqlAssistant
 cd Campus_SqlAssistant
 
 cd backend
